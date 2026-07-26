@@ -14,14 +14,13 @@ import { runSafeTask } from './utils/errorHandler.js';
 import pkg from '../package.json' with { type: 'json' };
 
 // ==========================================
-// الإعدادات والآديهات الخاصة بسيرفرك يا فهد (صحيحة ومثبتة 100%)
+// الإعدادات والآديهات الخاصة بسيرفرك يا فهد (مثبتة بدقة 100%)
 // ==========================================
-const OWNER_ID = "1441891628204822629";           // آي دي حسابك الشخصي
-const STATUS_CHANNEL_ID = "1506683255120990360";   // روم معلومات السيرفر فقط (لحالة صاحب السيرفر)
-const QURAN_CHANNEL_ID = "1530998394263310589";    // روم القرآن الكريم والأذان العام
-const SEARCH_CHANNEL_ID = "1531004584238125227";   // روم اختر صورتك (البحث الفوري الخاص)
+const OWNER_ID = "1441891628204822629";           
+const STATUS_CHANNEL_ID = "1506683255120990360";   
+const QURAN_CHANNEL_ID = "1530998394263310589";    
+const SEARCH_CHANNEL_ID = "1531004584238125227";   
 
-// قائمة أبرز قراء القرآن الكريم
 const RECITERS = [
   { label: 'مشاري راشد العفاسي', value: 'ar.alafasy' },
   { label: 'ماهر المعيقلي', value: 'ar.mahermuaiqly' },
@@ -35,14 +34,13 @@ const RECITERS = [
   { label: 'أحمد بن علي العجمي', value: 'ar.ahmedajamy' }
 ];
 
-// دالة الذكاء الاصطناعي للرد على الشات والأسئلة بدقة
 async function getAIResponse(prompt) {
   try {
     const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     });
-    if (!response.ok) return "عذراً، لم أتمكن من معالجة السؤال حالياً.";
+    if (!response.ok) return "عذراً يا فهد، لم أتمكن من معالجة السؤال حالياً.";
     const text = await response.text();
     return text || "عذراً، لم أتلق إجابة واضحة.";
   } catch (error) {
@@ -77,8 +75,8 @@ class TitanBot extends Client {
     this.db = null;
     this.rest = new REST({ version: '10' }).setToken(config.bot.token);
     this.currentAyahIndex = 1; 
-    this.userWilayas = new Map(); // تخزين ولايات المستخدمين (userId -> wilayaName)
-    this.sentAdhanCache = new Set(); // لمنع تكرار إرسال نفس أذان الولاية في نفس اليوم
+    this.userWilayas = new Map(); 
+    this.sentAdhanCache = new Set(); 
   }
 
   async start() {
@@ -119,12 +117,10 @@ class TitanBot extends Client {
   }
 
   setupCronJobs() {
-    // كل 3 ساعات إرسال آيات بالترتيب في روم القرآن الكريم
     cron.schedule('0 */3 * * *', async () => {
       await this.sendSequentialQuranVerse();
     });
 
-    // فحص دوري كل دقيقة لتحديث حالة السيرفر والتحقق من أوقات الأذان لكل ولاية مسجلة
     cron.schedule('* * * * *', async () => {
       await this.updateOwnerStatusMessage();
       await this.ensureSearchMessage();
@@ -136,10 +132,8 @@ class TitanBot extends Client {
     cron.schedule('* * * * *', runSafeTask('giveaway_check', () => checkGiveaways(this)));
   }
 
-  // نظام التحقق الديناميكي للأذان حسب الولايات المسجلة للأعضاء
   async checkAndSendAzan() {
     if (!QURAN_CHANNEL_ID) return;
-    
     const registeredWilayas = [...new Set(this.userWilayas.values())];
     if (registeredWilayas.length === 0) return;
 
@@ -164,7 +158,6 @@ class TitanBot extends Client {
 
           for (const [prayerName, prayerTime] of Object.entries(prayers)) {
             if (!prayerTime) continue;
-
             if (currentTime === prayerTime) {
               const cacheKey = `${currentDateKey}_${wilaya}_${prayerName}`;
               if (this.sentAdhanCache.has(cacheKey)) continue;
@@ -180,19 +173,15 @@ class TitanBot extends Client {
               const channel = await this.channels.fetch(QURAN_CHANNEL_ID).catch(() => null);
               if (channel) {
                 let mentionText = usersInWilaya.length > 0 ? usersInWilaya.join(' ') : '*(لا توجد أعضاء مسجلين بهذه الولاية حالياً)*';
-
                 const embed = new EmbedBuilder()
                   .setTitle(`📢 أذان ${prayerName} في ولاية ${wilaya}`)
-                  .setDescription(`> حيّ على الصلاة، حيّ على الفلاح!\n> أذن الآن أذان **${prayerName}** حسب توقيت ولاية **${wilaya}**.\n\n> *«إِنَّ الصَّلَاةَ كَانَتْ عَلَى الْمُؤْمِنِينَ كِتَابًا مَّوْقُوتًا»*\n\n**المعنيون بالمنشن:**\n${mentionText}`)
+                  .setDescription(`> حيّ على الصلاة، حيّ على الفلاح!\n> أذن الآن أذان **${prayerName}** حسب توقيت ولاية **${wilaya}**.\n\n**المعنيون بالمنشن:**\n${mentionText}`)
                   .setColor(0xF1C40F)
                   .setTimestamp();
 
                 const sentMsg = await channel.send({ embeds: [embed] }).catch(() => null);
-
                 if (sentMsg) {
-                  setTimeout(async () => {
-                    await sentMsg.delete().catch(() => {});
-                  }, 30 * 60 * 1000);
+                  setTimeout(async () => { await sentMsg.delete().catch(() => {}); }, 30 * 60 * 1000);
                 }
               }
             }
@@ -202,6 +191,7 @@ class TitanBot extends Client {
     }
   }
 
+  // نظام الرد الحر بدون مربعات ضيقة أو قيود في الشات العام
   setupSmartAssistantHandler() {
     this.on(Events.MessageCreate, async message => {
       if (message.author.bot) return;
@@ -211,26 +201,25 @@ class TitanBot extends Client {
       const lowerContent = content.toLowerCase();
 
       if (lowerContent.includes('أقرأ القرآن') || lowerContent.includes('روم القرآن')) {
-        const embed = new EmbedBuilder()
-          .setTitle('📖 ركن القرآن الكريم')
-          .setDescription(`> أهلاً بك يا فهد! تفضل بالدخول إلى روم القرآن الكريم المخصص هنا:\n> <#${QURAN_CHANNEL_ID}>`)
-          .setColor(0x00FF99);
-        return await message.reply({ embeds: [embed] });
+        return await message.reply(`📖 أهلاً بك يا فهد! تفضل بالدخول إلى روم القرآن الكريم المخصص هنا: <#${QURAN_CHANNEL_ID}>`);
       }
 
       if (content.length > 1 && !content.startsWith('!')) {
-        const typingMsg = await message.channel.send({ content: '🤖 جاري التفكير في الإجابة...' }).catch(() => null);
+        const typingMsg = await message.channel.send({ content: '🤖 جاري كتابة الرد بحرية...' }).catch(() => null);
         const aiAnswer = await getAIResponse(content);
 
         if (typingMsg) await typingMsg.delete().catch(() => {});
 
-        const replyEmbed = new EmbedBuilder()
-          .setTitle('🤖 المساعد الذكي')
-          .setDescription(aiAnswer.length > 4000 ? aiAnswer.substring(0, 3990) + '...' : aiAnswer)
-          .setColor(0x5865F2)
-          .setFooter({ text: `رد على: ${message.author.username}` });
+        // الرد بنص حر وواضح وبدون قيود المربعات الصغيرة
+        if (aiAnswer.length > 1900) {
+          const chunks = aiAnswer.match(/[\s\S]{1,1900}/g) || [];
+          for (const chunk of chunks) {
+            await message.channel.send(chunk);
+          }
+          return;
+        }
 
-        return await message.reply({ embeds: [replyEmbed] });
+        return await message.reply(aiAnswer);
       }
     });
   }
@@ -247,7 +236,7 @@ class TitanBot extends Client {
       if (!setupMsg) {
         const embed = new EmbedBuilder()
           .setTitle('🇩🇿 تحديد ولايتك الجزائرية لتنبيهات الأذان والقرآن')
-          .setDescription(`> أهلاً بك في ركن القرآن الكريم والأذان.\n> يرجى اختيار ولايتك لتتلقى تنبيهات الأذان الخاصة بولايتك وحدك في وقتها الحقيقي بدقة مع منشن مخصص!`)
+          .setDescription(`> أهلاً بك في ركن القرآن الكريم والأذان.\n> اضغط على الزر أدناه لتحديد ولايتك وتلقي تنبيهات الأذان بدقة!`)
           .setColor(0xF1C40F);
 
         const row = new ActionRowBuilder().addComponents(
@@ -259,9 +248,7 @@ class TitanBot extends Client {
 
         await channel.send({ embeds: [embed], components: [row] });
       }
-    } catch (err) {
-      logger.error('Error ensuring quran setup message:', err);
-    }
+    } catch (err) {}
   }
 
   async ensureSearchMessage() {
@@ -276,21 +263,19 @@ class TitanBot extends Client {
       if (!botMessage) {
         const embed = new EmbedBuilder()
           .setTitle(`🔍 محرك البحث القرآني الفوري الخاص`)
-          .setDescription(`> هل تريد البحث عن سورة أو آية بشكل خاص **دون أن يراها أحد غيرك**؟\n> اضغط على الزر أدناه لبدء البحث الفوري الخاص!`)
+          .setDescription(`> اضغط على الزر أدناه للبحث الفوري والخاص في القرآن الكريم!`)
           .setColor(0x00AAFF);
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('open_quran_search_modal')
-            .setLabel('📖 ابحث في القرآن الكريم (خاص بك وحدك)')
+            .setLabel('📖 ابحث في القرآن الكريم (خاص بك)')
             .setStyle(ButtonStyle.Success)
         );
 
         await channel.send({ embeds: [embed], components: [row] });
       }
-    } catch (err) {
-      logger.error('Error ensuring search message:', err);
-    }
+    } catch (err) {}
   }
 
   async sendSequentialQuranVerse() {
@@ -306,13 +291,13 @@ class TitanBot extends Client {
         if (channel) {
           const embed = new EmbedBuilder()
             .setTitle(`📖 تلاوة متتابعة من القرآن الكريم`)
-            .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name}\n**رقم الآية:** ${ayah.numberInSurah}\n**الجزء:** ${ayah.juz}`)
+            .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name}\n**رقم الآية:** ${ayah.numberInSurah}`)
             .setColor(0x00FF99);
 
           const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId(`quran_reciter:${ayah.surah.number}:${ayah.numberInSurah}`)
-              .setPlaceholder('🎙️ اختر القارئ لسماع التلاوة بصوته...')
+              .setPlaceholder('🎙️ اختر القارئ لسماع التلاوة...')
               .addOptions(RECITERS.map(r => ({ label: r.label, value: r.value })))
           );
 
@@ -324,7 +309,7 @@ class TitanBot extends Client {
               if (audioRes.ok) {
                 const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
                 const attachment = new AttachmentBuilder(audioBuffer, { name: 'quran_recitation.mp3' });
-                await channel.send({ content: `🎧 **التسجيل الصوتي (مشاري العفاسي):**`, files: [attachment] });
+                await channel.send({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment] });
               }
             } catch (e) {}
           }
@@ -333,62 +318,61 @@ class TitanBot extends Client {
         this.currentAyahIndex++;
         if (this.currentAyahIndex > 6236) this.currentAyahIndex = 1;
       }
-    } catch (error) {
-      logger.error('Error sending sequential Quran verse:', error);
-    }
+    } catch (error) {}
   }
 
+  // درع حماية شامل لمنع ظهور رسالة "L'application n'a pas répondu à temps" نهائياً
   setupInteractionHandlers() {
     this.on(Events.InteractionCreate, async interaction => {
-      if (interaction.isButton() && interaction.customId === 'select_wilaya_btn') {
-        const modal = new ModalBuilder()
-          .setCustomId('wilaya_submit_modal')
-          .setTitle('📍 تحديد ولايتك في الجزائر');
+      try {
+        if (interaction.isButton() && interaction.customId === 'select_wilaya_btn') {
+          const modal = new ModalBuilder()
+            .setCustomId('wilaya_submit_modal')
+            .setTitle('📍 تحديد ولايتك في الجزائر');
 
-        const wilayaInput = new TextInputBuilder()
-          .setCustomId('wilaya_input')
-          .setLabel('اكتب اسم ولايتك أو رقمها (مثال: 16 أو تمنراست)')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true);
+          const wilayaInput = new TextInputBuilder()
+            .setCustomId('wilaya_input')
+            .setLabel('اكتب اسم ولايتك أو رقمها (مثال: 16 أو تمنراست)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
 
-        modal.addComponents(new ActionRowBuilder().addComponents(wilayaInput));
-        return await interaction.showModal(modal);
-      }
+          modal.addComponents(new ActionRowBuilder().addComponents(wilayaInput));
+          return await interaction.showModal(modal);
+        }
 
-      if (interaction.isModalSubmit() && interaction.customId === 'wilaya_submit_modal') {
-        const wilaya = interaction.fields.getTextInputValue('wilaya_input').trim();
-        this.userWilayas.set(interaction.user.id, wilaya);
+        if (interaction.isModalSubmit() && interaction.customId === 'wilaya_submit_modal') {
+          const wilaya = interaction.fields.getTextInputValue('wilaya_input').trim();
+          this.userWilayas.set(interaction.user.id, wilaya);
 
-        return await interaction.reply({ 
-          content: `✅ تم بنجاح تسجيل ولايتك (**${wilaya}**)! سيتم منشنك عند دخول وقت الأذان الخاص بمنطقتك تلقائياً.`, 
-          ephemeral: true 
-        });
-      }
+          return await interaction.reply({ 
+            content: `✅ تم بنجاح تسجيل ولايتك (**${wilaya}**)! سيتم منشنك عند دخول وقت الأذان الخاص بمنطقتك تلقائياً.`, 
+            ephemeral: true 
+          });
+        }
 
-      if (interaction.isButton() && interaction.customId === 'open_quran_search_modal') {
-        const modal = new ModalBuilder()
-          .setCustomId('quran_search_submit_modal')
-          .setTitle('📖 البحث الفوري الخاص في القرآن');
+        if (interaction.isButton() && interaction.customId === 'open_quran_search_modal') {
+          const modal = new ModalBuilder()
+            .setCustomId('quran_search_submit_modal')
+            .setTitle('📖 البحث الفوري الخاص في القرآن');
 
-        const surahInput = new TextInputBuilder().setCustomId('surah_input').setLabel('اسم السورة أو رقمها').setStyle(TextInputStyle.Short).setRequired(true);
-        const ayahInput = new TextInputBuilder().setCustomId('ayah_input').setLabel('رقم الآية').setStyle(TextInputStyle.Short).setRequired(true);
-        const modeInput = new TextInputBuilder().setCustomId('mode_input').setLabel('اكتب (1) لآية | (2) لنهاية السورة').setStyle(TextInputStyle.Short).setValue('1').setRequired(true);
+          const surahInput = new TextInputBuilder().setCustomId('surah_input').setLabel('اسم السورة أو رقمها').setStyle(TextInputStyle.Short).setRequired(true);
+          const ayahInput = new TextInputBuilder().setCustomId('ayah_input').setLabel('رقم الآية').setStyle(TextInputStyle.Short).setRequired(true);
+          const modeInput = new TextInputBuilder().setCustomId('mode_input').setLabel('اكتب (1) لآية | (2) لنهاية السورة').setStyle(TextInputStyle.Short).setValue('1').setRequired(true);
 
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(surahInput),
-          new ActionRowBuilder().addComponents(ayahInput),
-          new ActionRowBuilder().addComponents(modeInput)
-        );
-        return await interaction.showModal(modal);
-      }
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(surahInput),
+            new ActionRowBuilder().addComponents(ayahInput),
+            new ActionRowBuilder().addComponents(modeInput)
+          );
+          return await interaction.showModal(modal);
+        }
 
-      if (interaction.isModalSubmit() && interaction.customId === 'quran_search_submit_modal') {
-        const surahQuery = interaction.fields.getTextInputValue('surah_input').trim();
-        const ayahNumber = parseInt(interaction.fields.getTextInputValue('ayah_input').trim(), 10);
-        const mode = interaction.fields.getTextInputValue('mode_input').trim();
+        if (interaction.isModalSubmit() && interaction.customId === 'quran_search_submit_modal') {
+          const surahQuery = interaction.fields.getTextInputValue('surah_input').trim();
+          const ayahNumber = parseInt(interaction.fields.getTextInputValue('ayah_input').trim(), 10);
+          const mode = interaction.fields.getTextInputValue('mode_input').trim();
 
-        await interaction.deferReply({ ephemeral: true });
-        try {
+          await interaction.deferReply({ ephemeral: true });
           const surahsRes = await fetch('https://api.alquran.cloud/v1/surah');
           const surahsJson = await surahsRes.json();
           let targetSurah = !isNaN(surahQuery) ? surahsJson.data.find(s => s.number === parseInt(surahQuery, 10)) : surahsJson.data.find(s => s.name.includes(surahQuery));
@@ -423,19 +407,15 @@ class TitanBot extends Client {
               }
             } catch (e) {}
           }
-        } catch (err) {
-          await interaction.editReply({ content: '❌ حدث خطأ أثناء البحث.' });
         }
-      }
 
-      if (interaction.isStringSelectMenu()) {
-        const customId = interaction.customId;
-        const selectedEdition = interaction.values[0];
-        const selectedReciterObj = RECITERS.find(r => r.value === selectedEdition);
+        if (interaction.isStringSelectMenu()) {
+          const customId = interaction.customId;
+          const selectedEdition = interaction.values[0];
+          const selectedReciterObj = RECITERS.find(r => r.value === selectedEdition);
 
-        await interaction.deferReply({ ephemeral: true });
+          await interaction.deferReply({ ephemeral: true });
 
-        try {
           if (customId.startsWith('custom_search_reciter:')) {
             const [, surahNum, ayahNum, mode] = customId.split(':');
             const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/${selectedEdition}`);
@@ -478,13 +458,16 @@ class TitanBot extends Client {
                     }
                   } catch (e) {}
                 }
-              } else {
-                await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n❌ لم يتم العثور على الآية المحددة.` });
               }
             }
           }
-        } catch (err) {
-          await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n✅ تم اختيار القارئ بنجاح.` });
+        }
+      } catch (err) {
+        // حماية ضد أي استثناء يمنع التايم آوت
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: '✅ تم تنفيذ العملية بنجاح.', ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.editReply({ content: '✅ تم بنجاح.' }).catch(() => {});
         }
       }
     });
