@@ -14,14 +14,14 @@ import { runSafeTask } from './utils/errorHandler.js';
 import pkg from '../package.json' with { type: 'json' };
 
 // ==========================================
-// الإعدادات الخاصة بسيرفرك يا فهد (مثبتة بدقة متناهية)
+// الإعدادات والآديهات الخاصة بسيرفرك يا فهد (صحيحة ومثبتة 100%)
 // ==========================================
 const OWNER_ID = "1441891628204822629";           // آي دي حسابك الشخصي
 const STATUS_CHANNEL_ID = "1506683255120990360";   // روم معلومات السيرفر فقط (لحالة صاحب السيرفر)
 const QURAN_CHANNEL_ID = "1530998394263310589";    // روم القرآن الكريم والأذان العام
 const SEARCH_CHANNEL_ID = "1531004584238125227";   // روم اختر صورتك (البحث الفوري الخاص)
 
-// قائمة أبرز قراء القرآن الكريم (المختمين لكتاب الله)
+// قائمة أبرز قراء القرآن الكريم
 const RECITERS = [
   { label: 'مشاري راشد العفاسي', value: 'ar.alafasy' },
   { label: 'ماهر المعيقلي', value: 'ar.mahermuaiqly' },
@@ -189,7 +189,6 @@ class TitanBot extends Client {
 
                 const sentMsg = await channel.send({ embeds: [embed] }).catch(() => null);
 
-                // حذف رسالة الأذان تلقائياً بعد 30 دقيقة
                 if (sentMsg) {
                   setTimeout(async () => {
                     await sentMsg.delete().catch(() => {});
@@ -248,7 +247,7 @@ class TitanBot extends Client {
       if (!setupMsg) {
         const embed = new EmbedBuilder()
           .setTitle('🇩🇿 تحديد ولايتك الجزائرية لتنبيهات الأذان والقرآن')
-          .setDescription(`> أهلاً بك في ركن القرآن الكريم والأذان.\n> يرجى اختيار ولايتك (مثل: تمنراست، قسنطينة، الجزائر العاصمة...) لتتلقى تنبيهات الأذان الخاصة بولايتك وحدك في وقتها الحقيقي بدقة مع منشن مخصص!`)
+          .setDescription(`> أهلاً بك في ركن القرآن الكريم والأذان.\n> يرجى اختيار ولايتك لتتلقى تنبيهات الأذان الخاصة بولايتك وحدك في وقتها الحقيقي بدقة مع منشن مخصص!`)
           .setColor(0xF1C40F);
 
         const row = new ActionRowBuilder().addComponents(
@@ -310,7 +309,6 @@ class TitanBot extends Client {
             .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name}\n**رقم الآية:** ${ayah.numberInSurah}\n**الجزء:** ${ayah.juz}`)
             .setColor(0x00FF99);
 
-          // تمرير رقم السورة ورقم الآية داخل السورة لضمان عمل القراء كلهم بكفاءة بدون أخطاء
           const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId(`quran_reciter:${ayah.surah.number}:${ayah.numberInSurah}`)
@@ -430,7 +428,6 @@ class TitanBot extends Client {
         }
       }
 
-      // معالجة تغيير القارئ عبر جلب السورة الكاملة لضمان عمل جميع القراء بنجاح 100%
       if (interaction.isStringSelectMenu()) {
         const customId = interaction.customId;
         const selectedEdition = interaction.values[0];
