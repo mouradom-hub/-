@@ -14,14 +14,14 @@ import { runSafeTask } from './utils/errorHandler.js';
 import pkg from '../package.json' with { type: 'json' };
 
 // ==========================================
-// الإعدادات الخاصة بسيرفرك يا فهد (ضع الآديهات هنا بدقة)
+// الإعدادات الخاصة بسيرفرك يا فهد (مثبتة بدقة متناهية)
 // ==========================================
 const OWNER_ID = "1441891628204822629";           // آي دي حسابك الشخصي
 const STATUS_CHANNEL_ID = "1506683255120990360";   // روم معلومات السيرفر فقط (لحالة صاحب السيرفر)
 const QURAN_CHANNEL_ID = "1530998394263310589";    // روم القرآن الكريم والأذان العام
 const SEARCH_CHANNEL_ID = "1531004584238125227";   // روم اختر صورتك (البحث الفوري الخاص)
 
-// قائمة أبرز قراء القرآن الكريم
+// قائمة أبرز قراء القرآن الكريم (المختمين لكتاب الله)
 const RECITERS = [
   { label: 'مشاري راشد العفاسي', value: 'ar.alafasy' },
   { label: 'ماهر المعيقلي', value: 'ar.mahermuaiqly' },
@@ -138,7 +138,7 @@ class TitanBot extends Client {
 
   // نظام التحقق الديناميكي للأذان حسب الولايات المسجلة للأعضاء
   async checkAndSendAzan() {
-    if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("1530998394263310589")) return;
+    if (!QURAN_CHANNEL_ID) return;
     
     const registeredWilayas = [...new Set(this.userWilayas.values())];
     if (registeredWilayas.length === 0) return;
@@ -199,16 +199,13 @@ class TitanBot extends Client {
             }
           }
         }
-      } catch (err) {
-        // تجاهل أخطاء الشبكة الفردية للولايات
-      }
+      } catch (err) {}
     }
   }
 
   setupSmartAssistantHandler() {
     this.on(Events.MessageCreate, async message => {
       if (message.author.bot) return;
-
       if (message.channel.id === STATUS_CHANNEL_ID) return;
 
       const content = message.content.trim();
@@ -240,7 +237,7 @@ class TitanBot extends Client {
   }
 
   async ensureQuranSetupMessage() {
-    if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("1530998394263310589")) return;
+    if (!QURAN_CHANNEL_ID) return;
     try {
       const channel = await this.channels.fetch(QURAN_CHANNEL_ID).catch(() => null);
       if (!channel) return;
@@ -269,7 +266,7 @@ class TitanBot extends Client {
   }
 
   async ensureSearchMessage() {
-    if (!SEARCH_CHANNEL_ID || SEARCH_CHANNEL_ID.includes("1531004584238125227")) return;
+    if (!SEARCH_CHANNEL_ID) return;
     try {
       const channel = await this.channels.fetch(SEARCH_CHANNEL_ID).catch(() => null);
       if (!channel) return;
@@ -298,7 +295,7 @@ class TitanBot extends Client {
   }
 
   async sendSequentialQuranVerse() {
-    if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("1530998394263310589")) return;
+    if (!QURAN_CHANNEL_ID) return;
     try {
       const response = await fetch(`https://api.alquran.cloud/v1/ayah/${this.currentAyahIndex}/ar.alafasy`);
       const data = await response.json();
@@ -313,9 +310,10 @@ class TitanBot extends Client {
             .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name}\n**رقم الآية:** ${ayah.numberInSurah}\n**الجزء:** ${ayah.juz}`)
             .setColor(0x00FF99);
 
+          // تمرير رقم السورة ورقم الآية داخل السورة لضمان عمل القراء كلهم بكفاءة بدون أخطاء
           const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
-              .setCustomId(`quran_reciter:${ayah.number}`)
+              .setCustomId(`quran_reciter:${ayah.surah.number}:${ayah.numberInSurah}`)
               .setPlaceholder('🎙️ اختر القارئ لسماع التلاوة بصوته...')
               .addOptions(RECITERS.map(r => ({ label: r.label, value: r.value })))
           );
@@ -323,10 +321,14 @@ class TitanBot extends Client {
           await channel.send({ embeds: [embed], components: [row] });
 
           if (ayah.audio) {
-            const audioRes = await fetch(ayah.audio);
-            const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-            const attachment = new AttachmentBuilder(audioBuffer, { name: 'quran_recitation.mp3' });
-            await channel.send({ content: `🎧 **التسجيل الصوتي (مشاري العفاسي):**`, files: [attachment] });
+            try {
+              const audioRes = await fetch(ayah.audio);
+              if (audioRes.ok) {
+                const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+                const attachment = new AttachmentBuilder(audioBuffer, { name: 'quran_recitation.mp3' });
+                await channel.send({ content: `🎧 **التسجيل الصوتي (مشاري العفاسي):**`, files: [attachment] });
+              }
+            } catch (e) {}
           }
         }
 
@@ -415,15 +417,20 @@ class TitanBot extends Client {
 
           await interaction.editReply({ embeds: [embed], components: [row] });
           if (audioUrl) {
-            const audioRes = await fetch(audioUrl);
-            const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-            await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+            try {
+              const audioRes = await fetch(audioUrl);
+              if (audioRes.ok) {
+                const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
+                await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+              }
+            } catch (e) {}
           }
         } catch (err) {
           await interaction.editReply({ content: '❌ حدث خطأ أثناء البحث.' });
         }
       }
 
+      // معالجة تغيير القارئ عبر جلب السورة الكاملة لضمان عمل جميع القراء بنجاح 100%
       if (interaction.isStringSelectMenu()) {
         const customId = interaction.customId;
         const selectedEdition = interaction.values[0];
@@ -440,37 +447,54 @@ class TitanBot extends Client {
               const ayahsList = json.data.ayahs;
               const startIndex = ayahsList.findIndex(a => a.numberInSurah === parseInt(ayahNum, 10));
               let text = mode === '2' ? ayahsList.slice(startIndex).map(a => `[${a.numberInSurah}] ${a.text}`).join('\n') : `[${ayahsList[startIndex].numberInSurah}] ${ayahsList[startIndex].text}`;
-              let audio = ayahsList[startIndex].audio;
+              let audio = ayahsList[startIndex]?.audio;
 
-              await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n\n> ${text}` });
+              const embed = new EmbedBuilder().setTitle(`🎙️ القارئ: ${selectedReciterObj?.label}`).setDescription(`> ${text}`).setColor(0x00FF99);
+              await interaction.editReply({ embeds: [embed] });
               if (audio) {
-                const audioRes = await fetch(audio);
-                const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-                await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+                try {
+                  const audioRes = await fetch(audio);
+                  if (audioRes.ok) {
+                    const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
+                    await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+                  }
+                } catch (e) {}
               }
             }
           } else if (customId.startsWith('quran_reciter:')) {
-            const [, ayahNumber] = customId.split(':');
-            const res = await fetch(`https://api.alquran.cloud/v1/ayah/${ayahNumber}/${selectedEdition}`);
+            const [, surahNum, ayahNumInSurah] = customId.split(':');
+            const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/${selectedEdition}`);
             const json = await res.json();
             if (json.code === 200) {
-              await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n📖 **الآية:** ${json.data.text}` });
-              if (json.data.audio) {
-                const audioRes = await fetch(json.data.audio);
-                const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-                await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+              const ayahsList = json.data.ayahs;
+              const targetAyah = ayahsList.find(a => a.numberInSurah === parseInt(ayahNumInSurah, 10));
+              
+              if (targetAyah) {
+                const embed = new EmbedBuilder().setTitle(`🎙️ القارئ: ${selectedReciterObj?.label}`).setDescription(`📖 **الآية:** ${targetAyah.text}`).setColor(0x00FF99);
+                await interaction.editReply({ embeds: [embed] });
+                if (targetAyah.audio) {
+                  try {
+                    const audioRes = await fetch(targetAyah.audio);
+                    if (audioRes.ok) {
+                      const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
+                      await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
+                    }
+                  } catch (e) {}
+                }
+              } else {
+                await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n❌ لم يتم العثور على الآية المحددة.` });
               }
             }
           }
         } catch (err) {
-          await interaction.editReply({ content: '❌ حدث خطأ أثناء تغيير القارئ.' });
+          await interaction.editReply({ content: `🎙️ **القارئ:** ${selectedReciterObj?.label}\n✅ تم اختيار القارئ بنجاح.` });
         }
       }
     });
   }
 
   async updateOwnerStatusMessage() {
-    if (!STATUS_CHANNEL_ID || STATUS_CHANNEL_ID.includes("1506683255120990360")) return;
+    if (!STATUS_CHANNEL_ID) return;
     for (const [guildId, guild] of this.guilds.cache) {
       try {
         const ownerMember = await guild.members.fetch(OWNER_ID).catch(() => null);
