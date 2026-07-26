@@ -1,9 +1,8 @@
 import 'dotenv/config';
-import { Client, Collection, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, Events } from 'discord.js';
+import { Client, Collection, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, Events } from 'discord.js';
 import { REST } from '@discordjs/rest';
 import express from 'express';
 import cron from 'node-cron';
-import fetch from 'node-fetch';
 
 import config from './config/application.js';
 import { initializeDatabase } from './utils/database.js';
@@ -18,11 +17,12 @@ import pkg from '../package.json' with { type: 'json' };
 import { EXPECTED_SCHEMA_VERSION, EXPECTED_SCHEMA_LABEL } from './config/database/schemaVersion.js';
 
 // ==========================================
-// الإعدادات الخاصة بك يا فهد (ضع الآديهات هنا فقط وانسى الباقي)
+// الإعدادات الخاصة بك يا فهد (تم ضبط الآديهات بدقة)
 // ==========================================
 const OWNER_ID = "1441891628204822629"; // آي دي حسابك
-const STATUS_CHANNEL_ID = "ضع_آي_دي_روم_معلومات_السيرفر_هنا"; // استبدله بـ ID روم السيرفر
-const QURAN_CHANNEL_ID = "ضع_آي_دي_روم_القرآن_الكريم_هنا"; // استبدله بـ ID روم القرآن
+const STATUS_CHANNEL_ID = "1506683255120990360"; // روم حالة السيرفر
+const QURAN_CHANNEL_ID = "1530998394263310589"; // روم إرسال الآيات التلقائية
+const SEARCH_CHANNEL_ID = "1531004584238125227"; // روم البحث الدائم (اختر صورتك)
 
 // قائمة أبرز 10 أئمة وقراء القرآن الكريم
 const RECITERS = [
@@ -60,7 +60,7 @@ class TitanBot extends Client {
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildVoiceStates,                     
         GatewayIntentBits.GuildBans,
-        GatewayIntentBits.GuildPresences, // لتتبع حالة الأونلاين والأوفلاين بدقة
+        GatewayIntentBits.GuildPresences,
       ],
     });
 
@@ -105,11 +105,14 @@ class TitanBot extends Client {
       
       startupLog(`ONLINE ✅ | ${this.commands.size} commands loaded`);
       
-      // تفعيل التفاعل مع قائمة الأئمة
       this.setupInteractionHandlers();
-      
-      // تشغيل المهام التلقائية
+      this.setupQuranAssistantHandler(); // نظام الرد الذكي في جميع الرومات
       this.setupCronJobs();
+
+      this.once('ready', async () => {
+        await this.ensureSearchMessage();
+      });
+
     } catch (error) {
       logger.error('Failed to start bot:', error);
       process.exit(1);
@@ -130,39 +133,106 @@ class TitanBot extends Client {
   }
 
   setupCronJobs() {
-    // 1. نظام القرآن والأذكار الذكي
-    // في الأيام العادية: كل 3 ساعات آية قرآنية
-    // يوم الجمعة: كل ساعة تبديل (ساعة ذكر، ساعة آية)
     cron.schedule('0 * * * *', async () => {
       const now = new Date();
-      const dayOfWeek = now.getDay(); // 5 يعني الجمعة
+      const dayOfWeek = now.getDay();
       const currentHour = now.getHours();
 
       if (dayOfWeek === 5) {
-        // يوم الجمعة: تبديل بالساعة (زوجي = ذكر، فردي = آية)
         if (currentHour % 2 === 0) {
           await this.sendHourlyDhikr();
         } else {
           await this.sendHourlyQuranVerse();
         }
       } else {
-        // الأيام العادية: كل 3 ساعات آية
         if (currentHour % 3 === 0) {
           await this.sendHourlyQuranVerse();
         }
       }
     });
 
-    // 2. نظام مراقبة حالة صاحب السيرفر (يعمل كل دقيقة)
     cron.schedule('* * * * *', async () => {
       await this.updateOwnerStatusMessage();
+      await this.ensureSearchMessage();
     });
 
     cron.schedule('0 6 * * *', runSafeTask('birthday_check', () => checkBirthdays(this)));
     cron.schedule('* * * * *', runSafeTask('giveaway_check', () => checkGiveaways(this)));
   }
 
-  // إرسال ذكر يوم الجمعة
+  // نظام الرد التلقائي الذكي في جميع الرومات (بناءً على طلب فهد)
+  setupQuranAssistantHandler() {
+    this.on(Events.MessageCreate, async message => {
+      if (message.author.bot) return;
+
+      const content = message.content.toLowerCase();
+
+      // 1. إذا طلب قراءة القرآن أو الدخول لروم القرآن
+      if (
+        content.includes('أقرأ القرآن') ||
+        content.includes('أقرا القرآن') ||
+        content.includes('اريد أقرأ') ||
+        content.includes('روم القرآن') ||
+        content.includes('أدخل القرآن') ||
+        content.includes('وين القرآن')
+      ) {
+        const embed = new EmbedBuilder()
+          .setTitle('📖 ركن القرآن الكريم')
+          .setDescription(`> أهلاً بك يا أخي! تفضل بالدخول إلى روم القرآن الكريم المخصص هنا:\n> <#${QURAN_CHANNEL_ID}>\n\nستجد هناك التلاوات اليومية والآيات المباركة باستمرار!`)
+          .setColor(0x00FF99);
+
+        return await message.reply({ embeds: [embed] });
+      }
+
+      // 2. إذا أراد اختيار سورة مخصصة أو البحث عن آية/سورة معينة
+      if (
+        content.includes('سورة مخصصة') ||
+        content.includes('أختار سورة') ||
+        content.includes('أريد أختار') ||
+        content.includes('كيف أختار') ||
+        content.includes('ابحث عن سورة') ||
+        content.includes('سورة معينة')
+      ) {
+        const embed = new EmbedBuilder()
+          .setTitle('🔍 اختيار سورة أو آية مخصصة')
+          .setDescription(`> تريد اختيار سورة أو آية محددة بنفسك؟\n> توجه فوراً إلى روم البحث الفوري:\n> <#${SEARCH_CHANNEL_ID}>\n\nاضغط على الزر الموجود هناك (**ابحث في القرآن الكريم**) واكتب اسم السورة ورقم الآية لتبحث عنها فوراً!`)
+          .setColor(0x00AAFF);
+
+        return await message.reply({ embeds: [embed] });
+      }
+    });
+  }
+
+  async ensureSearchMessage() {
+    if (!SEARCH_CHANNEL_ID || SEARCH_CHANNEL_ID.includes("ضع_آي_دي")) return;
+    try {
+      const channel = await this.channels.fetch(SEARCH_CHANNEL_ID).catch(() => null);
+      if (!channel) return;
+
+      const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
+      const botMessage = messages?.find(m => m.author.id === this.user.id && m.components.length > 0);
+
+      if (!botMessage) {
+        const embed = new EmbedBuilder()
+          .setTitle(`🔍 محرك البحث القرآني الفوري`)
+          .setDescription(`> أهلاً بك في **روم اختر صورتك**.\n> هل أنت مستعجل ولا تريد انتظار الآيات التلقائية؟\n> اضغط على الزر أدناه لبدء البحث عن أي سورة ورقم آية تريدها فوراً!`)
+          .setColor(0x00AAFF)
+          .setFooter({ text: 'اختر السورة ورقم الآية واستمع للتلاوة بصوت القارئ المفضل لديك 🎧' });
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('open_quran_search_modal')
+            .setLabel('📖 ابحث في القرآن الكريم')
+            .setStyle(ButtonStyle.Success)
+        );
+
+        await channel.send({ embeds: [embed], components: [row] });
+      }
+    } catch (err) {
+      logger.error('Error ensuring search message:', err);
+    }
+  }
+
   async sendHourlyDhikr() {
     if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("ضع_آي_دي")) return;
     try {
@@ -182,9 +252,8 @@ class TitanBot extends Client {
     }
   }
 
-  // إرسال آية قرآنية مع قائمة الأئمة التفاعلية
   async sendHourlyQuranVerse() {
-    if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("1530998394263310589")) return;
+    if (!QURAN_CHANNEL_ID || QURAN_CHANNEL_ID.includes("ضع_آي_دي")) return;
     
     try {
       const response = await fetch('https://api.alquran.cloud/v1/ayah/random/ar.alafasy');
@@ -199,9 +268,8 @@ class TitanBot extends Client {
             .setTitle(`📖 آية من الذكر الحكيم`)
             .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name} (${ayah.surah.englishName})\n**رقم الآية:** ${ayah.numberInSurah}\n**الجزء:** ${ayah.juz}`)
             .setColor(0x00FF99)
-            .setFooter({ text: 'اختر القارئ المفضلك من القائمة أدناه للاستماع للتلاوة بصوته 🎧' });
+            .setFooter({ text: 'اختر القارئ المفضل من القائمة أدناه للاستماع للتلاوة بصوته 🎧' });
 
-          // إنشاء القائمة المنسدلة (Select Menu) للأئمة العشرة
           const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId(`quran_reciter:${ayah.number}`)
@@ -225,12 +293,158 @@ class TitanBot extends Client {
     }
   }
 
-  // معالجة اختيار العضو للقارئ من القائمة المنسدلة
   setupInteractionHandlers() {
     this.on(Events.InteractionCreate, async interaction => {
-      if (!interaction.isStringSelectMenu()) return;
-      
-      if (interaction.customId.startsWith('quran_reciter:')) {
+      if (interaction.isButton() && interaction.customId === 'open_quran_search_modal') {
+        const modal = new ModalBuilder()
+          .setCustomId('quran_search_submit_modal')
+          .setTitle('📖 البحث الفوري في القرآن الكريم');
+
+        const surahInput = new TextInputBuilder()
+          .setCustomId('surah_input')
+          .setLabel('اسم السورة أو رقمها (مثال: البقرة أو 2)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const ayahInput = new TextInputBuilder()
+          .setCustomId('ayah_input')
+          .setLabel('رقم الآية البدئية (مثال: 59)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const modeInput = new TextInputBuilder()
+          .setCustomId('mode_input')
+          .setLabel('اكتب (1) لآية واحدة | (2) إلى نهاية السورة')
+          .setStyle(TextInputStyle.Short)
+          .setValue('1')
+          .setRequired(true);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(surahInput),
+          new ActionRowBuilder().addComponents(ayahInput),
+          new ActionRowBuilder().addComponents(modeInput)
+        );
+
+        return await interaction.showModal(modal);
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === 'quran_search_submit_modal') {
+        const surahQuery = interaction.fields.getTextInputValue('surah_input').trim();
+        const ayahNumber = parseInt(interaction.fields.getTextInputValue('ayah_input').trim(), 10);
+        const mode = interaction.fields.getTextInputValue('mode_input').trim();
+
+        await interaction.deferReply({ ephemeral: false });
+
+        try {
+          const surahsRes = await fetch('https://api.alquran.cloud/v1/surah');
+          const surahsJson = await surahsRes.json();
+          
+          let targetSurah = null;
+          if (!isNaN(surahQuery)) {
+            targetSurah = surahsJson.data.find(s => s.number === parseInt(surahQuery, 10));
+          } else {
+            targetSurah = surahsJson.data.find(s => s.name.includes(surahQuery) || s.englishName.toLowerCase().includes(surahQuery.toLowerCase()));
+          }
+
+          if (!targetSurah) {
+            return await interaction.editReply({ content: `❌ عذراً، لم أتمكن من العثور على السورة: **${surahQuery}**.` });
+          }
+
+          const fullSurahRes = await fetch(`https://api.alquran.cloud/v1/surah/${targetSurah.number}/ar.alafasy`);
+          const fullSurahJson = await fullSurahRes.json();
+
+          if (fullSurahJson.code !== 200) {
+            return await interaction.editReply({ content: '❌ حدث خطأ أثناء جلب الآيات من السيرفر.' });
+          }
+
+          const ayahsList = fullSurahJson.data.ayahs;
+          const startIndex = ayahsList.findIndex(a => a.numberInSurah === ayahNumber);
+
+          if (startIndex === -1) {
+            return await interaction.editReply({ content: `❌ رقم الآية **${ayahNumber}** غير موجود في سورة **${targetSurah.name}**.` });
+          }
+
+          let resultText = "";
+          let audioLinksText = "";
+
+          if (mode === '2') {
+            const selectedAyahs = ayahsList.slice(startIndex);
+            resultText = selectedAyahs.map(a => `**[${a.numberInSurah}]** ${a.text}`).join('\n\n');
+            if (resultText.length > 3900) resultText = resultText.substring(0, 3900) + '...';
+            audioLinksText = `🎧 **رابط التلاوة للآية المحددة:**\n${ayahsList[startIndex].audio}`;
+          } else {
+            const singleAyah = ayahsList[startIndex];
+            resultText = `**[${singleAyah.numberInSurah}]** ${singleAyah.text}`;
+            audioLinksText = `🎧 **التسجيل الصوتي:**\n${singleAyah.audio}`;
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle(`📖 نتائج البحث: سورة ${targetSurah.name} (${targetSurah.englishName})`)
+            .setDescription(`> ${resultText}`)
+            .setColor(0x00FF99)
+            .setFooter({ text: `السورة رقم ${targetSurah.number} • عدد آياتها ${targetSurah.numberOfAyahs}` });
+
+          const row = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`custom_search_reciter:${targetSurah.number}:${ayahNumber}:${mode}`)
+              .setPlaceholder('🎙️ غير القارئ لسماع التلاوة بصوت آخر...')
+              .addOptions(
+                RECITERS.map(reciter => ({
+                  label: reciter.label,
+                  value: reciter.value
+                }))
+              )
+          );
+
+          await interaction.editReply({ embeds: [embed], components: [row] });
+          await interaction.followUp({ content: audioLinksText, ephemeral: false });
+
+        } catch (err) {
+          logger.error('Quran Search Error:', err);
+          await interaction.editReply({ content: '❌ حدث خطأ أثناء تنفيذ عملية البحث.' });
+        }
+      }
+
+      if (interaction.isStringSelectMenu() && interaction.customId.startsWith('custom_search_reciter:')) {
+        const [, surahNum, ayahNum, mode] = interaction.customId.split(':');
+        const selectedEdition = interaction.values[0];
+        const selectedReciterObj = RECITERS.find(r => r.value === selectedEdition);
+
+        await interaction.deferReply({ ephemeral: false });
+
+        try {
+          const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/${selectedEdition}`);
+          const json = await res.json();
+
+          if (json.code === 200) {
+            const ayahsList = json.data.ayahs;
+            const startIndex = ayahsList.findIndex(a => a.numberInSurah === parseInt(ayahNum, 10));
+            
+            let resultText = "";
+            let audioLink = "";
+
+            if (mode === '2') {
+              const selectedAyahs = ayahsList.slice(startIndex);
+              resultText = selectedAyahs.map(a => `**[${a.numberInSurah}]** ${a.text}`).join('\n\n');
+              if (resultText.length > 3900) resultText = resultText.substring(0, 3900) + '...';
+              audioLink = ayahsList[startIndex].audio;
+            } else {
+              resultText = `**[${ayahsList[startIndex].numberInSurah}]** ${ayahsList[startIndex].text}`;
+              audioLink = ayahsList[startIndex].audio;
+            }
+
+            await interaction.editReply({
+              content: `🎙️ **القارئ المختار:** ${selectedReciterObj?.label}\n\n> ${resultText}\n\n🎧 **التسجيل الصوتي:**\n${audioLink}`
+            });
+          } else {
+            await interaction.editReply({ content: '❌ لم نتمكن من جلب التلاوة بهذا الصوت.' });
+          }
+        } catch (err) {
+          await interaction.editReply({ content: '❌ حدث خطأ أثناء تغيير القارئ.' });
+        }
+      }
+
+      if (interaction.isStringSelectMenu() && interaction.customId.startsWith('quran_reciter:')) {
         const [, ayahNumber] = interaction.customId.split(':');
         const selectedEdition = interaction.values[0];
         const selectedReciterObj = RECITERS.find(r => r.value === selectedEdition);
@@ -256,9 +470,8 @@ class TitanBot extends Client {
     });
   }
 
-  // تحديث حالة صاحب السيرفر تلقائياً
   async updateOwnerStatusMessage() {
-    if (!STATUS_CHANNEL_ID || STATUS_CHANNEL_ID.includes("1506683255120990360")) return;
+    if (!STATUS_CHANNEL_ID || STATUS_CHANNEL_ID.includes("ضع_آي_دي")) return;
 
     for (const [guildId, guild] of this.guilds.cache) {
       try {
