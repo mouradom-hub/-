@@ -30,19 +30,83 @@ export default {
 
       logger.debug(`Message received from ${message.author.tag}: ${message.content}`);
 
+      // 1. لعبة العد
       const countingProcessed = await handleCountingGame(message, client);
       if (countingProcessed) {
         return;
       }
 
+      // 2. ميزة الذكاء الاصطناعي للرومات الستة
+      const aiProcessed = await handleAiChat(message);
+      if (aiProcessed) {
+        return;
+      }
+
+      // 3. أوامر البريفكس
       await handlePrefixCommand(message, client);
 
+      // 4. نظام اللفلات
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
     }
   }
 };
+
+// ==========================================
+// آي دي الرومات الستة الخاصة بك (استبدل النصوص بالآديهات الحقيقية)
+// ==========================================
+async function handleAiChat(message) {
+  try {
+    const allowedChannelIds = [
+      "1506683255120990359",
+      "1506683255120990360",
+      "1530869590697967728",
+      "1530955306396549160",
+      "1506683255120990362"
+      "1506683255120990363"
+    ]; 
+
+    if (!allowedChannelIds.includes(message.channel.id)) {
+      return false;
+    }
+
+    await message.channel.sendTyping();
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      await message.reply("❌ تنبيه: لم يتم ضبط مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) في إعدادات المنصة.");
+      return true;
+    }
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: message.content }]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (aiReply) {
+      await message.reply(aiReply);
+    } else {
+      await message.reply("عذراً، لم أستطع فهم السؤال، حاول مرة أخرى.");
+    }
+
+    return true; 
+  } catch (error) {
+    logger.error('Error handling AI chat:', error);
+    await message.reply("حدث خطأ أثناء محاولة الاتصال بالذكاء الاصطناعي.").catch(() => {});
+    return true;
+  }
+}
 
 async function handlePrefixCommand(message, client) {
   try {
@@ -190,7 +254,7 @@ async function handleLeveling(message, client) {
       return;
     }
 
-    const levelingConfig = await getLevelingConfig(client, message.guild.id);
+    const levelingConfig = getLevelingConfig ? await getLevelingConfig(client, message.guild.id) : null;
     
     if (!levelingConfig?.enabled) {
       return;
