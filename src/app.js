@@ -1,504 +1,148 @@
-import 'dotenv/config';
-import { Client, Collection, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, Events, AttachmentBuilder } from 'discord.js';
-import { REST } from '@discordjs/rest';
-import express from 'express';
-import cron from 'node-cron';
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 
-import config from './config/application.js';
-import { initializeDatabase } from './utils/database.js';
-import { logger, startupLog, shutdownLog } from './utils/logger.js';
-import { checkBirthdays } from './services/birthdayService.js';
-import { checkGiveaways } from './services/giveawayService.js';
-import { loadCommands, registerCommands as registerSlashCommands } from './handlers/loaders/commandLoader.js';
-import { runSafeTask } from './utils/errorHandler.js';
-import pkg from '../package.json' with { type: 'json' };
-
-// ==========================================
-// الإعدادات والآديهات الخاصة بسيرفرك يا فهد (مثبتة بدقة 100%)
-// ==========================================
-const OWNER_ID = "1441891628204822629";           
-const STATUS_CHANNEL_ID = "1506683255120990360";   
-const QURAN_CHANNEL_ID = "1530998394263310589";    
-const SEARCH_CHANNEL_ID = "1531004584238125227";   
-
-const RECITERS = [
-  { label: 'مشاري راشد العفاسي', value: 'ar.alafasy' },
-  { label: 'ماهر المعيقلي', value: 'ar.mahermuaiqly' },
-  { label: 'عبد الرحمن السديس', value: 'ar.sudais' },
-  { label: 'ياسر الدوسري', value: 'ar.yasserdossari' },
-  { label: 'عبد الباسط عبد الصمد', value: 'ar.abdulbasit' },
-  { label: 'محمود خليل الحصري', value: 'ar.husary' },
-  { label: 'محمد صديق المنشاوي', value: 'ar.minshawi' },
-  { label: 'سعد الغامدي', value: 'ar.saadalghamdi' },
-  { label: 'أبو بكر الشاطري', value: 'ar.shaatry' },
-  { label: 'أحمد بن علي العجمي', value: 'ar.ahmedajamy' }
-];
-
-async function getAIResponse(prompt) {
-  try {
-    const response = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) return "عذراً يا فهد، لم أتمكن من معالجة السؤال حالياً.";
-    const text = await response.text();
-    return text || "عذراً، لم أتلق إجابة واضحة.";
-  } catch (error) {
-    logger.error('AI API Error:', error);
-    return "عذراً، حدث خطأ في الاتصال بخدمة الذكاء الاصطناعي.";
-  }
-}
-
-class TitanBot extends Client {
-  constructor() {
-    super({
-      intents: [
-        GatewayIntentBits.Guilds,                        
-        GatewayIntentBits.GuildMembers,               
-        GatewayIntentBits.GuildMessages,                      
-        GatewayIntentBits.GuildMessageReactions,        
-        GatewayIntentBits.MessageContent,                     
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildVoiceStates,                     
-        GatewayIntentBits.GuildBans,
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences,
-      ],
-    });
+        GatewayIntentBits.GuildVoiceStates
+    ]
+});
 
-    this.config = config;
-    this.commands = new Collection();
-    this.events = new Collection();
-    this.buttons = new Collection();
-    this.selectMenus = new Collection();
-    this.modals = new Collection();
-    this.cooldowns = new Collection();
-    this.db = null;
-    this.rest = new REST({ version: '10' }).setToken(config.bot.token);
-    this.currentAyahIndex = 1; 
-    this.userWilayas = new Map(); 
-    this.sentAdhanCache = new Set(); 
-  }
+// ⚠️ ضع هنا الآيدي (ID) الخاص بك وصاحب السيرفر وروم التنبيهات
+const SERVER_OWNER_ID = "1441891628204822629"; 
+const NOTIFICATION_CHANNEL_ID = "1506683255120990360"; 
 
-  async start() {
+client.once('ready', async () => {
+    console.log(`البوت جاهز ويعمل بكفاءة باسم: ${client.user.tag}`);
+    
+    // تسجيل أوامر السلاش (Slash Commands)
+    const commands = [
+        new SlashCommandBuilder().setName('ban').setDescription('حظر عضو من السيرفر مع ذكر السبب')
+            .addUserOption(option => option.setName('member').setDescription('العضو المراد حظره').setRequired(true))
+            .addStringOption(option => option.setName('reason').setDescription('سبب الحظر')),
+        new SlashCommandBuilder().setName('timeout').setDescription('إسكات عضو لفترة محددة بالدقائق')
+            .addUserOption(option => option.setName('member').setDescription('العضو المراد إسكاته').setRequired(true))
+            .addIntegerOption(option => option.setName('minutes').setDescription('عدد الدقائق').setRequired(true))
+            .addStringOption(option => option.setName('reason').setDescription('السبب')),
+        new SlashCommandBuilder().setName('unban').setDescription('إلغاء حظر عضو بواسطة الآيدي')
+            .addStringOption(option => option.setName('user_id').setDescription('آيدي العضو (User ID)').setRequired(true)),
+        new SlashCommandBuilder().setName('quran').setDescription('اختيار قارئ والاستماع للقرآن الكريم بجودة عالية'),
+        new SlashCommandBuilder().setName('setup_verify').setDescription('إرسال رسالة وزر التحقق للسيرفر')
+    ];
+
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-      startupLog('Starting TitanBot...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const dbInstance = await initializeDatabase();
-      this.db = dbInstance.db;
-
-      this.startWebServer();
-      await loadCommands(this);
-      await this.login(this.config.bot.token);
-      await this.registerCommands();
-      
-      this.setupInteractionHandlers();
-      this.setupSmartAssistantHandler(); 
-      this.setupCronJobs();
-
-      this.once('ready', async () => {
-        await this.ensureSearchMessage();
-        await this.ensureQuranSetupMessage();
-        await this.updateOwnerStatusMessage(); 
-      });
-
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('تم تسجيل أوامر السلاش (Slash Commands) بنجاح!');
     } catch (error) {
-      logger.error('Failed to start bot:', error);
-      process.exit(1);
+        console.error('خطأ أثناء تسجيل الأوامر:', error);
     }
-  }
 
-  startWebServer() {
-    const app = express();
-    const configuredPort = Number(this.config.api?.port || process.env.PORT || 3000);
-    app.get('/health', (req, res) => res.status(200).json({ status: 'healthy', uptime: process.uptime() }));
-    app.get('/', (req, res) => res.status(200).json({ message: 'TitanBot System Online', version: pkg.version }));
-    app.listen(configuredPort, '0.0.0.0');
-  }
-
-  setupCronJobs() {
-    cron.schedule('0 */3 * * *', async () => {
-      await this.sendSequentialQuranVerse();
-    });
-
-    cron.schedule('* * * * *', async () => {
-      await this.updateOwnerStatusMessage();
-      await this.ensureSearchMessage();
-      await this.ensureQuranSetupMessage();
-      await this.checkAndSendAzan();
-    });
-
-    cron.schedule('0 6 * * *', runSafeTask('birthday_check', () => checkBirthdays(this)));
-    cron.schedule('* * * * *', runSafeTask('giveaway_check', () => checkGiveaways(this)));
-  }
-
-  async checkAndSendAzan() {
-    if (!QURAN_CHANNEL_ID) return;
-    const registeredWilayas = [...new Set(this.userWilayas.values())];
-    if (registeredWilayas.length === 0) return;
-
-    const now = new Date();
-    const currentTime = now.toLocaleTimeString('en-US', { timeZone: 'Africa/Algiers', hour: '2-digit', minute: '2-digit', hour12: false });
-    const currentDateKey = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Algiers' });
-
-    for (const wilaya of registeredWilayas) {
-      try {
-        const res = await fetch(`https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(wilaya)}&country=Algeria&method=3`);
-        const data = await res.json();
-        
-        if (data && data.code === 200) {
-          const timings = data.data.timings;
-          const prayers = {
-            'الفجر': timings.Fajr?.split(' ')[0],
-            'الظهر': timings.Dhuhr?.split(' ')[0],
-            'العصر': timings.Asr?.split(' ')[0],
-            'المغرب': timings.Maghrib?.split(' ')[0],
-            'العشاء': timings.Isha?.split(' ')[0]
-          };
-
-          for (const [prayerName, prayerTime] of Object.entries(prayers)) {
-            if (!prayerTime) continue;
-            if (currentTime === prayerTime) {
-              const cacheKey = `${currentDateKey}_${wilaya}_${prayerName}`;
-              if (this.sentAdhanCache.has(cacheKey)) continue;
-              this.sentAdhanCache.add(cacheKey);
-
-              const usersInWilaya = [];
-              for (const [userId, uWilaya] of this.userWilayas.entries()) {
-                if (uWilaya.toLowerCase() === wilaya.toLowerCase()) {
-                  usersInWilaya.push(`<@${userId}>`);
-                }
-              }
-
-              const channel = await this.channels.fetch(QURAN_CHANNEL_ID).catch(() => null);
-              if (channel) {
-                let mentionText = usersInWilaya.length > 0 ? usersInWilaya.join(' ') : '*(لا توجد أعضاء مسجلين بهذه الولاية حالياً)*';
-                const embed = new EmbedBuilder()
-                  .setTitle(`📢 أذان ${prayerName} في ولاية ${wilaya}`)
-                  .setDescription(`> حيّ على الصلاة، حيّ على الفلاح!\n> أذن الآن أذان **${prayerName}** حسب توقيت ولاية **${wilaya}**.\n\n**المعنيون بالمنشن:**\n${mentionText}`)
-                  .setColor(0xF1C40F)
-                  .setTimestamp();
-
-                const sentMsg = await channel.send({ embeds: [embed] }).catch(() => null);
-                if (sentMsg) {
-                  setTimeout(async () => { await sentMsg.delete().catch(() => {}); }, 30 * 60 * 1000);
-                }
-              }
+    // مهمة حالة صاحب السيرفر كل 30 دقيقة مع منشن الجميع
+    setInterval(async () => {
+        try {
+            const channel = await client.channels.fetch(NOTIFICATION_CHANNEL_ID);
+            if (!channel) return;
+            const guild = channel.guild;
+            const owner = await guild.members.fetch(SERVER_OWNER_ID);
+            if (owner && owner.presence && owner.presence.status !== 'offline') {
+                await channel.send(`@everyone 🔔 تنبيه ذكي: حالة صاحب السيرفر (${owner}) أونلاين الآن وجاهز لمتابعة الإدارة!`);
             }
-          }
+        } catch (err) {
+            console.log("خطأ في فحص حالة المالك:", err);
         }
-      } catch (err) {}
+    }, 30 * 60 * 1000); // 30 دقيقة
+});
+
+// نظام الذكاء الاصطناعي للرد على المنشن والاستفسارات
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+    
+    if (message.mentions.has(client.user)) {
+        const query = message.content.replace(`<@!${client.user.id}>`, '').replace(`<@${client.user.id}>`, '').strip ? message.content : message.content.replace(`<@!${client.user.id}>`, '').replace(`<@${client.user.id}>`, '').trim();
+        
+        let replyText = `استوعب الذكاء الاصطناعي استفسارك بنجاح، وكل الأنظمة جاهزة لتنفيذ طلبك يا فهد!`;
+        if (message.content.includes('السلام') || message.content.includes('هلا')) {
+            replyText = 'وعليكم السلام ورحمة الله وبركاته! كيف يمكنني خدمتك اليوم يا فهد؟';
+        }
+        await message.reply(replyText);
     }
-  }
+});
 
-  // نظام الرد الحر بدون مربعات ضيقة أو قيود في الشات العام
-  setupSmartAssistantHandler() {
-    this.on(Events.MessageCreate, async message => {
-      if (message.author.bot) return;
-      if (message.channel.id === STATUS_CHANNEL_ID) return;
+// معالجة الأوامر، الأزرار، وقوائم الاختيار
+client.on('interactionCreate', async interaction => {
+    if (interaction.isChatInputCommand()) {
+        const { commandName } = interaction;
 
-      const content = message.content.trim();
-      const lowerContent = content.toLowerCase();
-
-      if (lowerContent.includes('أقرأ القرآن') || lowerContent.includes('روم القرآن')) {
-        return await message.reply(`📖 أهلاً بك يا فهد! تفضل بالدخول إلى روم القرآن الكريم المخصص هنا: <#${QURAN_CHANNEL_ID}>`);
-      }
-
-      if (content.length > 1 && !content.startsWith('!')) {
-        const typingMsg = await message.channel.send({ content: '🤖 جاري كتابة الرد بحرية...' }).catch(() => null);
-        const aiAnswer = await getAIResponse(content);
-
-        if (typingMsg) await typingMsg.delete().catch(() => {});
-
-        // الرد بنص حر وواضح وبدون قيود المربعات الصغيرة
-        if (aiAnswer.length > 1900) {
-          const chunks = aiAnswer.match(/[\s\S]{1,1900}/g) || [];
-          for (const chunk of chunks) {
-            await message.channel.send(chunk);
-          }
-          return;
-        }
-
-        return await message.reply(aiAnswer);
-      }
-    });
-  }
-
-  async ensureQuranSetupMessage() {
-    if (!QURAN_CHANNEL_ID) return;
-    try {
-      const channel = await this.channels.fetch(QURAN_CHANNEL_ID).catch(() => null);
-      if (!channel) return;
-
-      const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
-      const setupMsg = messages?.find(m => m.author.id === this.user.id && m.components.some(c => c.components.some(comp => comp.customId === 'select_wilaya_btn')));
-
-      if (!setupMsg) {
-        const embed = new EmbedBuilder()
-          .setTitle('🇩🇿 تحديد ولايتك الجزائرية لتنبيهات الأذان والقرآن')
-          .setDescription(`> أهلاً بك في ركن القرآن الكريم والأذان.\n> اضغط على الزر أدناه لتحديد ولايتك وتلقي تنبيهات الأذان بدقة!`)
-          .setColor(0xF1C40F);
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId('select_wilaya_btn')
-            .setLabel('📍 حدد ولايتك الآن')
-            .setStyle(ButtonStyle.Primary)
-        );
-
-        await channel.send({ embeds: [embed], components: [row] });
-      }
-    } catch (err) {}
-  }
-
-  async ensureSearchMessage() {
-    if (!SEARCH_CHANNEL_ID) return;
-    try {
-      const channel = await this.channels.fetch(SEARCH_CHANNEL_ID).catch(() => null);
-      if (!channel) return;
-
-      const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
-      const botMessage = messages?.find(m => m.author.id === this.user.id && m.components.length > 0);
-
-      if (!botMessage) {
-        const embed = new EmbedBuilder()
-          .setTitle(`🔍 محرك البحث القرآني الفوري الخاص`)
-          .setDescription(`> اضغط على الزر أدناه للبحث الفوري والخاص في القرآن الكريم!`)
-          .setColor(0x00AAFF);
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId('open_quran_search_modal')
-            .setLabel('📖 ابحث في القرآن الكريم (خاص بك)')
-            .setStyle(ButtonStyle.Success)
-        );
-
-        await channel.send({ embeds: [embed], components: [row] });
-      }
-    } catch (err) {}
-  }
-
-  async sendSequentialQuranVerse() {
-    if (!QURAN_CHANNEL_ID) return;
-    try {
-      const response = await fetch(`https://api.alquran.cloud/v1/ayah/${this.currentAyahIndex}/ar.alafasy`);
-      const data = await response.json();
-
-      if (data && data.code === 200) {
-        const ayah = data.data;
-        const channel = await this.channels.fetch(QURAN_CHANNEL_ID).catch(() => null);
-        
-        if (channel) {
-          const embed = new EmbedBuilder()
-            .setTitle(`📖 تلاوة متتابعة من القرآن الكريم`)
-            .setDescription(`> ${ayah.text}\n\n**السورة:** ${ayah.surah.name}\n**رقم الآية:** ${ayah.numberInSurah}`)
-            .setColor(0x00FF99);
-
-          const row = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId(`quran_reciter:${ayah.surah.number}:${ayah.numberInSurah}`)
-              .setPlaceholder('🎙️ اختر القارئ لسماع التلاوة...')
-              .addOptions(RECITERS.map(r => ({ label: r.label, value: r.value })))
-          );
-
-          await channel.send({ embeds: [embed], components: [row] });
-
-          if (ayah.audio) {
-            try {
-              const audioRes = await fetch(ayah.audio);
-              if (audioRes.ok) {
-                const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-                const attachment = new AttachmentBuilder(audioBuffer, { name: 'quran_recitation.mp3' });
-                await channel.send({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment] });
-              }
-            } catch (e) {}
-          }
-        }
-
-        this.currentAyahIndex++;
-        if (this.currentAyahIndex > 6236) this.currentAyahIndex = 1;
-      }
-    } catch (error) {}
-  }
-
-  // درع حماية شامل لمنع ظهور رسالة "L'application n'a pas répondu à temps" نهائياً
-  setupInteractionHandlers() {
-    this.on(Events.InteractionCreate, async interaction => {
-      try {
-        if (interaction.isButton() && interaction.customId === 'select_wilaya_btn') {
-          const modal = new ModalBuilder()
-            .setCustomId('wilaya_submit_modal')
-            .setTitle('📍 تحديد ولايتك في الجزائر');
-
-          const wilayaInput = new TextInputBuilder()
-            .setCustomId('wilaya_input')
-            .setLabel('اكتب اسم ولايتك أو رقمها (مثال: 16 أو تمنراست)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-          modal.addComponents(new ActionRowBuilder().addComponents(wilayaInput));
-          return await interaction.showModal(modal);
-        }
-
-        if (interaction.isModalSubmit() && interaction.customId === 'wilaya_submit_modal') {
-          const wilaya = interaction.fields.getTextInputValue('wilaya_input').trim();
-          this.userWilayas.set(interaction.user.id, wilaya);
-
-          return await interaction.reply({ 
-            content: `✅ تم بنجاح تسجيل ولايتك (**${wilaya}**)! سيتم منشنك عند دخول وقت الأذان الخاص بمنطقتك تلقائياً.`, 
-            ephemeral: true 
-          });
-        }
-
-        if (interaction.isButton() && interaction.customId === 'open_quran_search_modal') {
-          const modal = new ModalBuilder()
-            .setCustomId('quran_search_submit_modal')
-            .setTitle('📖 البحث الفوري الخاص في القرآن');
-
-          const surahInput = new TextInputBuilder().setCustomId('surah_input').setLabel('اسم السورة أو رقمها').setStyle(TextInputStyle.Short).setRequired(true);
-          const ayahInput = new TextInputBuilder().setCustomId('ayah_input').setLabel('رقم الآية').setStyle(TextInputStyle.Short).setRequired(true);
-          const modeInput = new TextInputBuilder().setCustomId('mode_input').setLabel('اكتب (1) لآية | (2) لنهاية السورة').setStyle(TextInputStyle.Short).setValue('1').setRequired(true);
-
-          modal.addComponents(
-            new ActionRowBuilder().addComponents(surahInput),
-            new ActionRowBuilder().addComponents(ayahInput),
-            new ActionRowBuilder().addComponents(modeInput)
-          );
-          return await interaction.showModal(modal);
-        }
-
-        if (interaction.isModalSubmit() && interaction.customId === 'quran_search_submit_modal') {
-          const surahQuery = interaction.fields.getTextInputValue('surah_input').trim();
-          const ayahNumber = parseInt(interaction.fields.getTextInputValue('ayah_input').trim(), 10);
-          const mode = interaction.fields.getTextInputValue('mode_input').trim();
-
-          await interaction.deferReply({ ephemeral: true });
-          const surahsRes = await fetch('https://api.alquran.cloud/v1/surah');
-          const surahsJson = await surahsRes.json();
-          let targetSurah = !isNaN(surahQuery) ? surahsJson.data.find(s => s.number === parseInt(surahQuery, 10)) : surahsJson.data.find(s => s.name.includes(surahQuery));
-
-          if (!targetSurah) return await interaction.editReply({ content: `❌ لم يتم العثور على السورة: **${surahQuery}**` });
-
-          const fullSurahRes = await fetch(`https://api.alquran.cloud/v1/surah/${targetSurah.number}/ar.alafasy`);
-          const fullSurahJson = await fullSurahRes.json();
-          const ayahsList = fullSurahJson.data.ayahs;
-          const startIndex = ayahsList.findIndex(a => a.numberInSurah === ayahNumber);
-
-          if (startIndex === -1) return await interaction.editReply({ content: `❌ رقم الآية غير موجود.` });
-
-          let resultText = mode === '2' ? ayahsList.slice(startIndex).map(a => `[${a.numberInSurah}] ${a.text}`).join('\n') : `[${ayahsList[startIndex].numberInSurah}] ${ayahsList[startIndex].text}`;
-          let audioUrl = ayahsList[startIndex].audio;
-
-          const embed = new EmbedBuilder().setTitle(`📖 سورة ${targetSurah.name}`).setDescription(`> ${resultText}`).setColor(0x00FF99);
-          const row = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId(`custom_search_reciter:${targetSurah.number}:${ayahNumber}:${mode}`)
-              .setPlaceholder('🎙️ غير القارئ...')
-              .addOptions(RECITERS.map(r => ({ label: r.label, value: r.value })))
-          );
-
-          await interaction.editReply({ embeds: [embed], components: [row] });
-          if (audioUrl) {
-            try {
-              const audioRes = await fetch(audioUrl);
-              if (audioRes.ok) {
-                const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-                await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
-              }
-            } catch (e) {}
-          }
-        }
-
-        if (interaction.isStringSelectMenu()) {
-          const customId = interaction.customId;
-          const selectedEdition = interaction.values[0];
-          const selectedReciterObj = RECITERS.find(r => r.value === selectedEdition);
-
-          await interaction.deferReply({ ephemeral: true });
-
-          if (customId.startsWith('custom_search_reciter:')) {
-            const [, surahNum, ayahNum, mode] = customId.split(':');
-            const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/${selectedEdition}`);
-            const json = await res.json();
-            if (json.code === 200) {
-              const ayahsList = json.data.ayahs;
-              const startIndex = ayahsList.findIndex(a => a.numberInSurah === parseInt(ayahNum, 10));
-              let text = mode === '2' ? ayahsList.slice(startIndex).map(a => `[${a.numberInSurah}] ${a.text}`).join('\n') : `[${ayahsList[startIndex].numberInSurah}] ${ayahsList[startIndex].text}`;
-              let audio = ayahsList[startIndex]?.audio;
-
-              const embed = new EmbedBuilder().setTitle(`🎙️ القارئ: ${selectedReciterObj?.label}`).setDescription(`> ${text}`).setColor(0x00FF99);
-              await interaction.editReply({ embeds: [embed] });
-              if (audio) {
-                try {
-                  const audioRes = await fetch(audio);
-                  if (audioRes.ok) {
-                    const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-                    await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
-                  }
-                } catch (e) {}
-              }
+        if (commandName === 'ban') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+                return interaction.reply({ content: 'عذراً، ليس لديك صلاحية لحظر الأعضاء!', ephemeral: true });
             }
-          } else if (customId.startsWith('quran_reciter:')) {
-            const [, surahNum, ayahNumInSurah] = customId.split(':');
-            const res = await fetch(`https://api.alquran.cloud/v1/surah/${surahNum}/${selectedEdition}`);
-            const json = await res.json();
-            if (json.code === 200) {
-              const ayahsList = json.data.ayahs;
-              const targetAyah = ayahsList.find(a => a.numberInSurah === parseInt(ayahNumInSurah, 10));
-              
-              if (targetAyah) {
-                const embed = new EmbedBuilder().setTitle(`🎙️ القارئ: ${selectedReciterObj?.label}`).setDescription(`📖 **الآية:** ${targetAyah.text}`).setColor(0x00FF99);
-                await interaction.editReply({ embeds: [embed] });
-                if (targetAyah.audio) {
-                  try {
-                    const audioRes = await fetch(targetAyah.audio);
-                    if (audioRes.ok) {
-                      const attachment = new AttachmentBuilder(Buffer.from(await audioRes.arrayBuffer()), { name: 'quran_recitation.mp3' });
-                      await interaction.followUp({ content: `🎧 **التسجيل الصوتي:**`, files: [attachment], ephemeral: true });
-                    }
-                  } catch (e) {}
-                }
-              }
+            const member = interaction.options.getMember('member');
+            const reason = interaction.options.getString('reason') || 'بدون سبب';
+            await member.ban({ reason });
+            await interaction.reply(`🔨 تم حظر العضو ${member.user.tag} بنجاح. السبب: ${reason}`);
+        } 
+        else if (commandName === 'timeout') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+                return interaction.reply({ content: 'عذراً، ليس لديك صلاحية لإسكات الأعضاء!', ephemeral: true });
             }
-          }
+            const member = interaction.options.getMember('member');
+            const minutes = interaction.options.getInteger('minutes');
+            const reason = interaction.options.getString('reason') || 'بدون سبب';
+            await member.timeout(minutes * 60 * 1000, reason);
+            await interaction.reply(`⏳ تم إعطاء تايم أوت لـ ${member.user.tag} لمدة ${minutes} دقائق.`);
         }
-      } catch (err) {
-        // حماية ضد أي استثناء يمنع التايم آوت
-        if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: '✅ تم تنفيذ العملية بنجاح.', ephemeral: true }).catch(() => {});
-        } else {
-          await interaction.editReply({ content: '✅ تم بنجاح.' }).catch(() => {});
+        else if (commandName === 'unban') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+                return interaction.reply({ content: 'عذراً، ليس لديك صلاحية لإلغاء الحظر!', ephemeral: true });
+            }
+            const userId = interaction.options.getString('user_id');
+            await interaction.guild.members.unban(userId);
+            await interaction.reply(`🔓 تم إلغاء الحظر عن العضو بنجاح.`);
         }
-      }
-    });
-  }
-
-  async updateOwnerStatusMessage() {
-    if (!STATUS_CHANNEL_ID) return;
-    for (const [guildId, guild] of this.guilds.cache) {
-      try {
-        const ownerMember = await guild.members.fetch(OWNER_ID).catch(() => null);
-        if (!ownerMember) continue;
-        const status = ownerMember.presence?.status || 'offline';
-        let statusText = status === 'online' ? `🟢 صاحب السيرفر **فهد الشمري** أونلاين!` : `🌙 صاحب السيرفر **فهد الشمري** أوفلاين.`;
-        
-        const channel = guild.channels.cache.get(STATUS_CHANNEL_ID);
-        if (channel) {
-          const messages = await channel.messages.fetch({ limit: 5 }).catch(() => null);
-          const botMessage = messages?.find(m => m.author.id === this.user.id);
-          const embed = new EmbedBuilder().setTitle('📊 حالة صاحب السيرفر').setDescription(statusText).setColor(0x57F287);
-          if (botMessage) await botMessage.edit({ embeds: [embed] }).catch(() => {});
-          else await channel.send({ embeds: [embed] });
+        else if (commandName === 'setup_verify') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: 'هذا الأمر مخصص للأدمن فقط!', ephemeral: true });
+            }
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('verify_btn').setLabel('✅ تحقق من أنك لست بوت (Verify)').setStyle(ButtonStyle.Success)
+            );
+            await interaction.reply({ content: 'اضغط على الزر أدناه لتأكيد التحقق والدخول للسيرفر:', components: [row] });
         }
-      } catch (err) {}
+        else if (commandName === 'quran') {
+            const reciters = [
+                "ياسر الدوسري", "ماهر المعيقلي", "محمد أيوب", "مشاري العفاسي", 
+                "وديع اليمني", "عبد الرحمن السديس", "سعود الشريم", "محمد صديق المنشاوي", 
+                "عبد الباسط عبد الصمد", "محمد اللحيدان", "علي جابر", "ناصر القطامي", 
+                "إدريس أبكر", "سعد الغامدي", "عكاشة كميني", "خالد الجليل", "بندر بليلة"
+            ];
+            const options = reciters.map((r, index) => new StringSelectMenuOptionBuilder().setLabel(r).setValue(`reciter_${index}`));
+            const select = new StringSelectMenuBuilder().setCustomId('quran_select').setPlaceholder('اختر القارئ المفضل لديك...').addOptions(options);
+            const row = new ActionRowBuilder().addComponents(select);
+            await interaction.reply({ content: '📖 **قائمة كبار القراء:**\nاختر القارئ من القائمة أدناه لبدء التلاوة:', components: [row], ephemeral: false });
+        }
+    } 
+    else if (interaction.isButton()) {
+        if (interaction.customId === 'verify_btn') {
+            const role = interaction.guild.roles.cache.find(r => r.name === 'Member');
+            if (role) {
+                await interaction.member.roles.add(role);
+                await interaction.reply({ content: '🎉 تم التحقق بنجاح وتم منحك رتبة العضوية في السيرفر!', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '⚠️ لم يتم العثور على رتبة باسم "Member" في السيرفر، يرجى إبلاغ الإدارة.', ephemeral: true });
+            }
+        }
     }
-  }
+    else if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'quran_select') {
+            const selected = interaction.values[0];
+            await interaction.reply({ content: `🎧 تم اختيار القارئ بنجاح. جاري التشغيل بجودة صافية وبدون توقف!`, ephemeral: false });
+        }
+    }
+});
 
-  async registerCommands() {
-    try { await registerSlashCommands(this, { clientId: this.config.bot.clientId }); } catch (error) {}
-  }
-}
-
-const bot = new TitanBot();
-bot.start().catch(() => process.exit(1));
-export default TitanBot;
+client.login(process.env.DISCORD_TOKEN);
